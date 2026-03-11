@@ -16,6 +16,21 @@ let cellSize = 30;
 
 let isDrawing = false;
 let drawValue: boolean | null = null;
+let pendingInternalHashChangeCount = 0;
+
+function getCanvasCellFromClient(canvas: HTMLCanvasElement, clientX: number, clientY: number) {
+	const rect = canvas.getBoundingClientRect();
+	if (rect.width === 0 || rect.height === 0) {
+		return { x: -1, y: -1 };
+	}
+	const scaleX = canvas.width / rect.width;
+	const scaleY = canvas.height / rect.height;
+	const canvasX = (clientX - rect.left) * scaleX;
+	const canvasY = (clientY - rect.top) * scaleY;
+	const x = Math.floor(canvasX / cellSize);
+	const y = Math.floor(canvasY / cellSize);
+	return { x, y };
+}
 
 function createGrid() {
 	if (grid.length == 0) {
@@ -54,6 +69,7 @@ function updateGrid() {
 	if (!gridDiv) return;
 	gridDiv.innerHTML = '';
 	const canvas = document.createElement('canvas');
+	canvas.id = 'main-canvas';
 	gridDiv.appendChild(canvas);
 
 	// 固定幅からセルサイズを計算
@@ -63,12 +79,12 @@ function updateGrid() {
 	canvas.height = rows * cellSize + 1;
 	canvas.style.border = '1px solid #888';
 	canvas.style.cursor = 'pointer';
+	canvas.style.touchAction = 'none';
 
 	canvas.addEventListener('mousedown', (e) => {
 		isDrawing = true;
-		const rect = canvas.getBoundingClientRect();
-		const x = Math.floor((e.clientX - rect.left) / cellSize);
-		const y = Math.floor((e.clientY - rect.top) / cellSize);
+		const canvas = document.getElementById('main-canvas') as HTMLCanvasElement;
+		const { x, y } = getCanvasCellFromClient(canvas, e.clientX, e.clientY);
 		if (y >= 0 && y < grid.length && x >= 0 && x < grid[0].length) {
 			drawValue = !grid[y][x];
 			grid[y][x] = drawValue;
@@ -78,9 +94,8 @@ function updateGrid() {
 	});
 	canvas.addEventListener('mousemove', (e) => {
 		if (!isDrawing || drawValue === null) return;
-		const rect = canvas.getBoundingClientRect();
-		const x = Math.floor((e.clientX - rect.left) / cellSize);
-		const y = Math.floor((e.clientY - rect.top) / cellSize);
+		const canvas = document.getElementById('main-canvas') as HTMLCanvasElement;
+		const { x, y } = getCanvasCellFromClient(canvas, e.clientX, e.clientY);
 		if (y >= 0 && y < grid.length && x >= 0 && x < grid[0].length) {
 			if (grid[y][x] !== drawValue) {
 				grid[y][x] = drawValue;
@@ -92,10 +107,9 @@ function updateGrid() {
 	// タッチ操作に対応
 	canvas.addEventListener('touchstart', (e) => {
 		e.preventDefault();
-		const rect = canvas.getBoundingClientRect();
 		const touch = e.touches[0];
-		const x = Math.floor((touch.clientX - rect.left) / cellSize);
-		const y = Math.floor((touch.clientY - rect.top) / cellSize);
+		const canvas = document.getElementById('main-canvas') as HTMLCanvasElement;
+		const { x, y } = getCanvasCellFromClient(canvas, touch.clientX, touch.clientY);
 		isDrawing = true;
 		drawValue = (y >= 0 && y < grid.length && x >= 0 && x < grid[0].length) ? !grid[y][x] : null;
 		if (drawValue !== null) {
@@ -107,10 +121,9 @@ function updateGrid() {
 	canvas.addEventListener('touchmove', (e) => {
 		e.preventDefault();
 		if (!isDrawing || drawValue === null) return;
-		const rect = canvas.getBoundingClientRect();
 		const touch = e.touches[0];
-		const x = Math.floor((touch.clientX - rect.left) / cellSize);
-		const y = Math.floor((touch.clientY - rect.top) / cellSize);
+		const canvas = document.getElementById('main-canvas') as HTMLCanvasElement;
+		const { x, y } = getCanvasCellFromClient(canvas, touch.clientX, touch.clientY);
 		if (y >= 0 && y < grid.length && x >= 0 && x < grid[0].length) {
 			if (grid[y][x] !== drawValue) {
 				grid[y][x] = drawValue;
@@ -167,6 +180,10 @@ function resizeGrid() {
 };
 
 window.addEventListener('hashchange', () => {
+	if (pendingInternalHashChangeCount > 0) {
+		pendingInternalHashChangeCount--;
+		return;
+	}
 	loadGridFromHash();
 });
 // URLハッシュからグリッドを復元
@@ -195,7 +212,10 @@ function loadGridFromHash() {
 // グリッド変更時にURLハッシュを更新
 function saveGridToHash() {
 	const hash = gridToHash(grid, getPlusMinus());
-	location.hash = encodeURIComponent(hash);
+	const encodedHash = encodeURIComponent(hash);
+	if (location.hash.slice(1) === encodedHash) return;
+	pendingInternalHashChangeCount++;
+	location.hash = encodedHash;
 }
 
 function getPlusMinus(): Map<MinoKind, { plus: number, minus: number }> {
